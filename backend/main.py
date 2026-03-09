@@ -221,7 +221,7 @@ class SensorFusionEngine:
         
         confirmed = {t for t, s in tag_scores.items() if s / norm_confidence > 0.4} if norm_confidence > 0 else set()
         ambiguous = {t for t, s in tag_scores.items() if 0.1 <= s / norm_confidence <= 0.3} if norm_confidence > 0 else set()
-        return confirmed, ambiguous, round(total_active_weight, 2), extracted_times
+        return confirmed, ambiguous, round(norm_confidence, 2), extracted_times
 
 
 # =================================================================
