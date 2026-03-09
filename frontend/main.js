@@ -12,8 +12,8 @@
    CONSTANTS
 ══════════════════════════════════════════════════ */
 const API_ENDPOINT = 'http://127.0.0.1:8000/api/evaluate';
-const LOOP_INTERVAL_MS = 10000;   // 4 seconds between scenarios
-const OVERRIDE_TIMEOUT = 5000;   // 2 seconds to human decision
+const LOOP_INTERVAL_MS = 4000;   // 4 seconds between scenarios
+const OVERRIDE_TIMEOUT = 2000;   // 2 seconds to human decision
 
 /* ══════════════════════════════════════════════════
    SENSOR LABELS (human-friendly names)
