@@ -104,12 +104,13 @@ class SensorFusionEngine:
                 r"STOP", 
                 r"VIETATO", 
                 r"CHIUSA", 
-                r"MERCATO", 
+                r"MERCATO",
+                r"AREA\s*PEDONALE", 
                 r"PESANTI", 
                 r"ALT"
             ],
             "ECCEZIONE_GENERICA": [r"ECCETTO", r"TRANNE", r"CONSENTITO", r"OK"],
-            "TARGET_BUS": [r"BUS", r"NAVETT[AE]", r"L4", r"AUTORIZZATI"],
+            "TARGET_BUS": [r"BUS", r"NAVETT[AE]", r"L4"],
             "VARCO_INATTIVO": [r"INATTIVO", r"NON\s*ATTIVO", r"SPENTO", r"FINE\s+Z\s*T\s*L"],
             "SOLO_FESTIVI": [r"FESTIVI"]
         }
@@ -117,27 +118,70 @@ class SensorFusionEngine:
     def _clean_text(self, text: str) -> str:
         if not text: return ""
         text = text.upper()
-        # Normalizzazione OCR standard
-        text = text.replace('0', 'O').replace('1', 'I').replace('5', 'S').replace('8', 'B')
-        # NON rimuoviamo tutti gli spazi qui per permettere alle regex di funzionare meglio
+
+        # 1. FIX SPAZIATURA (es. "D I V I E T O" -> "DIVIETO")
+        # Se ci sono singole lettere separate da spazi, le uniamo
+        text = re.sub(r'(?<=\b[A-Z])\s+(?=[A-Z]\b)', '', text)
+
+        # 2. FIX CONTESTUALE ORARI (Il cuore del problema)
+        # Cerchiamo pattern tipo O6:OO o I4:3O e trasformiamo solo quelli in numeri
+        def fix_time_context(match):
+            t = match.group(0)
+            return t.replace('O', '0').replace('I', '1').replace('S', '5').replace('B', '8')
+
+        # Applichiamo il fix solo a stringhe che somigliano a orari (es. XX:XX o XX-XX)
+        text = re.sub(r'([0-9OI]{1,2}[:\-.][0-9OI]{2})', fix_time_context, text)
+        text = re.sub(r'(\b[0-9OI]{1,2}\s*[-]\s*[0-9OI]{1,2}\b)', fix_time_context, text)
+
+        # 3. FIX PAROLE CHIAVE (Standardizzazione)
+        # Qui correggiamo errori comuni nelle parole senza toccare i numeri
+        replacements = {
+            r"D1V1ET0": "DIVIETO",
+            r"ACCE550": "ACCESSO",
+            r"V4RC0": "VARCO",
+            r"ATT1V0": "ATTIVO",
+            r"S3NS0": "SENSO", 
+            r"UN1C0": "UNICO", 
+            r"4LT3RN4T0": "ALTERNATO"
+        }
+        for pattern, replacement in replacements.items():
+            text = re.sub(pattern, replacement, text)
         return text
 
     def _extract_times(self, raw_text: str) -> Tuple[Optional[str], Optional[str]]:
-        """Estrae orari gestendo vari formati (08:00, 08-20, 8:00)."""
         if not raw_text: return None, None
-        
-        # 1. Cerca formato HH:MM (es. 08:00 o 8:00)
-        times = re.findall(r'(\d{1,2}:\d{2})', raw_text)
-        if len(times) >= 2:
-            return times[0], times[1]
-            
-        # 2. Cerca formato HH-HH (es. 08-20)
-        short_times = re.findall(r'(\d{1,2})-(\d{1,2})', raw_text)
-        if short_times:
-            return f"{int(short_times[0][0]):02d}:00", f"{int(short_times[0][1]):02d}:00"
-            
-        return None, None
+        text = raw_text.upper()
 
+        # 1. Gestione Formati "H24" (Scenari 31, 93)
+        if any(x in text.replace(" ", "") for x in ["0-24", "H24", "SEMPRE"]):
+            return "00:00", "23:59"
+
+        # 2. Regex Universale: estrae sequenze di numeri che sembrano orari
+        # (HH:MM oppure solo HH)
+        # Gruppo 1: Ore, Gruppo 2: Minuti (opzionali)
+        matches = re.findall(r'(?<!\d)(\d{1,2})(?::(\d{2}))?(?!\d)', text)
+        
+        times = []
+        for h, m in matches:
+            hour = int(h)
+            # Validazione: l'ora deve essere nel range 0-24
+            if 0 <= hour <= 24:
+                min_str = m if m else "00"
+                times.append(f"{hour:02d}:{min_str}")
+
+        print(f"DEBUG: Estratti orari da '{raw_text}': {times}")
+        # 3. Logica di Selezione Range
+        if len(times) >= 2:
+            # Se abbiamo almeno due orari, prendiamo i primi due (es: "08:00 - 20:00")
+            return times[0], times[1]
+        
+        elif len(times) == 1:
+            # Se c'è un solo orario (es: "ZTL DALLE 20" o "ZTL 20:00")
+            # Assumiamo che la restrizione inizi lì e duri fino a fine giornata
+            # o che sia un orario di inizio ZTL notturna.
+            return times[0], "23:59"
+
+        return None, None
     def fuse(self, sensori_input: SensoriInput) -> Tuple[Set[str], Set[str], float, dict]:
         sensors_data = [sensori_input.camera_frontale, sensori_input.camera_laterale, sensori_input.V2I_receiver]
         tag_scores = {}
@@ -172,6 +216,7 @@ class SensorFusionEngine:
                 elif 0.40 <= ratio <= 0.60: ambiguous_tags.add(tag)
                     
         return confirmed_tags, ambiguous_tags, round(total_active_weight, 2), extracted_times
+
 
 # =================================================================
 # 4. VALUTATORE DI CONTESTO (Ottimizzato per Scenario 3)
