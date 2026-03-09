@@ -29,7 +29,7 @@ const SENSOR_LABELS = {
 const ACTION_LABELS = {
     GO: 'AVANTI',
     STOP: 'STOP',
-    OVERRIDE_REQUIRED: 'OVERRIDE',
+    OVERRIDE_REQUIRED: 'RICHIESTA INTERVENTO',
 };
 
 const ACTION_DESCRIPTIONS = {
@@ -219,31 +219,35 @@ class SimulationController {
     /* ── RESPONSE HANDLING ──────────────────────── */
     async _handleResponse(data) {
         console.log(data);
-        const action = (data.action || '').toUpperCase();
+        const baseAction = (data.action || '').toUpperCase();
+        const description = data.reason ?? data.description;
+        const confidence = data.confidence ?? 0;
 
-        switch (action) {
+        if (data.needs_review) {
+            // Backend delegates decision to the driver; baseAction is the suggestion
+            this._suggestedAction = baseAction || 'STOP';
+            this._applyDecision({
+                action: 'OVERRIDE_REQUIRED',
+                confidence,
+                description: description ?? ACTION_DESCRIPTIONS['OVERRIDE_REQUIRED'],
+            });
+            this._addLog('Override richiesto — attesa decisione driver', 'override');
+            this._updateConfermaButton(this._suggestedAction);
+            this._startOverrideCountdown();
+            return;
+        }
+
+        switch (baseAction) {
             case 'GO':
             case 'STOP':
                 this._applyDecision({
-                    action,
-                    confidence: data.confidence ?? 80,
-                    description: data.description ?? ACTION_DESCRIPTIONS[action],
+                    action: baseAction,
+                    confidence,
+                    description: description ?? ACTION_DESCRIPTIONS[baseAction],
                 });
-                this._addLog(`Decisione: ${ACTION_LABELS[action] || action}`, action === 'GO' ? 'go' : 'stop');
+                this._addLog(`Decisione: ${ACTION_LABELS[baseAction] || baseAction}`, baseAction === 'GO' ? 'go' : 'stop');
                 this.currentIndex++;
                 this._scheduleNextLoop();
-                break;
-
-            case 'OVERRIDE_REQUIRED':
-                this._suggestedAction = (data.suggested_action || 'STOP').toUpperCase();
-                this._applyDecision({
-                    action: 'OVERRIDE_REQUIRED',
-                    confidence: data.confidence ?? 30,
-                    description: data.description ?? ACTION_DESCRIPTIONS['OVERRIDE_REQUIRED'],
-                });
-                this._addLog('Override richiesto — attesa decisione driver', 'override');
-                this._updateConfermaButton(this._suggestedAction);  // ← aggiunta
-                this._startOverrideCountdown();
                 break;
 
             default:
@@ -277,7 +281,7 @@ class SimulationController {
 
         this.decisionLabel.textContent = 'DECISIONE SISTEMA';
 
-        const stateClass = action === 'GO' ? 'state-go' : action === 'STOP' ? 'state-stop' : 'state-processing';
+        const stateClass = action === 'GO' ? 'state-go' : action === 'STOP' ? 'state-stop' : 'state-override';
         this.decisionAction.className = `decision-action ${stateClass}`;
         this.actionText.textContent = ACTION_LABELS[action] || action;
         this.decisionDesc.textContent = description || ACTION_DESCRIPTIONS[action] || '';
@@ -363,7 +367,7 @@ class SimulationController {
         if (!this.isRunning) return;
         this._cancelAllTimers();
         this._showOverridePanelMode(null);
-    
+
         if (choice === 'OVERRIDE') {
             this.decisionAction.className = 'decision-action state-stop';
             this.actionText.textContent = ACTION_LABELS['STOP'];
@@ -379,7 +383,7 @@ class SimulationController {
             this._setSystemStatus(confirmed === 'GO' ? 'go' : 'stop', `CONFERMATO — ${ACTION_LABELS[confirmed]}`);
             this._addLog(`Driver: Confermato suggerimento ${ACTION_LABELS[confirmed]}`, 'override');
         }
-    
+
         this.currentIndex++;
         this._runNextScenario();  // entrambi avanzano immediatamente
     }

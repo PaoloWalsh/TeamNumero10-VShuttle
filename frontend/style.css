@@ -542,6 +542,11 @@ input[type="file"] { display: none; }
   border-color: var(--border-mid);
   animation: processing-pulse 1.5s ease-in-out infinite;
 }
+.decision-action.state-override {
+  border-color: var(--override-primary);
+  background: var(--override-dim);
+  box-shadow: 0 0 40px var(--override-glow), inset 0 0 30px rgba(255,184,0,0.05);
+}
 
 @keyframes processing-pulse {
   0%,100% { border-color: var(--border-mid); }
@@ -558,11 +563,12 @@ input[type="file"] { display: none; }
   transition: color 0.3s ease;
 }
 
-.decision-action.state-go    #actionText { color: var(--go-primary); }
-.decision-action.state-stop  #actionText { color: var(--stop-primary); }
+.decision-action.state-go       #actionText { color: var(--go-primary); }
+.decision-action.state-stop     #actionText { color: var(--stop-primary); }
+.decision-action.state-override #actionText { color: var(--override-primary); }
 
 .decision-description {
-  font-size: 3rem;
+  font-size: 1.5rem;
   font-weight: bold;
   color: var(--text-secondary);
   text-align: center;
