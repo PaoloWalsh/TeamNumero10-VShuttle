@@ -195,6 +195,7 @@ class SensorFusionEngine:
         tag_scores = {}
         total_active_weight = 0.0
         extracted_times = {'start': None, 'end': None}
+        active_sensors = 0
 
         for data in sensors_data:
             if not data.testo or data.confidenza is None: continue
@@ -202,8 +203,8 @@ class SensorFusionEngine:
             clean_txt = self._clean_text(data.testo)
             weight = data.confidenza
             total_active_weight += weight
-
             # Ricerca Tag
+            active_sensors += 1
             for tag_name, regex_patterns in self.vocabulary.items():
                 for pattern in regex_patterns:
                     if re.search(pattern, clean_txt):
@@ -215,15 +216,12 @@ class SensorFusionEngine:
                 s, e = self._extract_times(clean_txt)
                 if s and e:
                     extracted_times['start'], extracted_times['end'] = s, e
-
-        confirmed_tags, ambiguous_tags = set(), set()
-        if total_active_weight > 0:
-            for tag, score in tag_scores.items():
-                ratio = score / total_active_weight
-                if ratio > 0.60: confirmed_tags.add(tag)
-                elif 0.40 <= ratio <= 0.60: ambiguous_tags.add(tag)
-                    
-        return confirmed_tags, ambiguous_tags, round(total_active_weight, 2), extracted_times
+        
+        norm_confidence = round(total_active_weight / active_sensors, 2) if active_sensors > 0 else 0.0
+        
+        confirmed = {t for t, s in tag_scores.items() if s / norm_confidence > 0.4} if norm_confidence > 0 else set()
+        ambiguous = {t for t, s in tag_scores.items() if 0.1 <= s / norm_confidence <= 0.3} if norm_confidence > 0 else set()
+        return confirmed, ambiguous, round(total_active_weight, 2), extracted_times
 
 
 # =================================================================
