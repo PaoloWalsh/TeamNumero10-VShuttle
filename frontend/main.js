@@ -221,7 +221,7 @@ class SimulationController {
         console.log(data);
         const baseAction = (data.action || '').toUpperCase();
         const description = data.reason ?? data.description;
-        const confidence = data.confidence ?? 0;
+        const confidence = (data.confidence ?? 0) * 100;
 
         if (data.needs_review) {
             // Backend delegates decision to the driver; baseAction is the suggestion
