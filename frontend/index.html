@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>V-SHUTTLE — Dashboard Safety Driver</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div id="app">
+
+    <!-- HEADER -->
+    <header class="hud-header">
+      <div class="header-left">
+        <div class="logo-mark">V</div>
+        <div class="header-titles">
+          <span class="brand">V-SHUTTLE</span>
+          <span class="subtitle">SAFETY DRIVER INTERFACE — REV 2.4</span>
+        </div>
+      </div>
+      <div class="header-center">
+        <div class="sys-status" id="sysStatus">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusLabel">SISTEMA IN ATTESA</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="clock-block">
+          <span class="clock-label">ORA LOCALE</span>
+          <span class="clock" id="clock">--:--:--</span>
+        </div>
+        <div class="scenario-block">
+          <span class="clock-label">SCENARIO</span>
+          <span class="clock" id="scenarioCounter">0 / 0</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN -->
+    <main class="hud-main">
+
+      <!-- LEFT: Controlli -->
+      <section class="panel panel-controls" aria-label="Pannello di controllo">
+
+        <div class="panel-title">
+          <span class="panel-icon">⬡</span> CONTROLLO MISSIONE
+        </div>
+
+        <div class="control-group" id="loadSection">
+          <label class="file-label" for="fileInput">
+            <div class="file-icon">📁</div>
+            <div class="file-text">
+              <span class="file-primary">CARICA DATASET</span>
+              <span class="file-secondary" id="fileStatus">Nessun file selezionato</span>
+            </div>
+          </label>
+          <input type="file" id="fileInput" accept=".json" />
+        </div>
+
+        <button class="btn-start" id="btnStart" disabled>
+          <span class="btn-icon">▶</span>
+          <span class="btn-text">START SIMULATION</span>
+          <span class="btn-sub">Premi per avviare il loop</span>
+        </button>
+
+        <button class="btn-stop hidden" id="btnStop">
+          <span class="btn-icon">■</span>
+          <span class="btn-text">ARRESTA</span>
+          <span class="btn-sub">Ferma la simulazione</span>
+        </button>
+
+        <div class="loop-info hidden" id="loopInfo">
+          <div class="loop-row">
+            <span class="loop-label">PROSSIMO CICLO</span>
+            <div class="loop-timer-bar">
+              <div class="loop-timer-fill" id="loopTimerFill"></div>
+            </div>
+          </div>
+          <div class="loop-row">
+            <span class="loop-label">INTERVALLO</span>
+            <span class="loop-value">4.0 s</span>
+          </div>
+        </div>
+
+        <div class="action-log">
+          <div class="log-title">LOG AZIONI</div>
+          <div class="log-entries" id="logEntries">
+            <div class="log-entry log-idle">— In attesa di dati —</div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- CENTER: Decisione -->
+      <section class="panel panel-decision" id="panelDecision">
+
+        <div class="decision-idle" id="decisionIdle">
+          <div class="idle-graphic">
+            <div class="idle-ring ring-1"></div>
+            <div class="idle-ring ring-2"></div>
+            <div class="idle-ring ring-3"></div>
+            <div class="idle-core"><span>V</span></div>
+          </div>
+          <p class="idle-text">Carica un dataset e avvia la simulazione per ricevere le decisioni del sistema.</p>
+        </div>
+
+        <div class="decision-card hidden" id="decisionCard">
+
+          <div class="decision-label" id="decisionLabel">ELABORAZIONE</div>
+
+          <div class="decision-action" id="decisionAction">
+            <span id="actionText">—</span>
+          </div>
+
+          <div class="decision-description" id="decisionDescription">
+            In attesa di risposta dal sistema...
+          </div>
+
+          <div class="confidence-block">
+            <div class="confidence-header">
+              <span class="confidence-title">LIVELLO DI CONFIDENZA</span>
+              <span class="confidence-value" id="confidenceValue">—</span>
+            </div>
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" id="confidenceBarFill"></div>
+            </div>
+            <div class="confidence-scale">
+              <span>BASSA</span>
+              <span>MEDIA</span>
+              <span>ALTA</span>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="override-panel hidden" id="overridePanel">
+
+          <div class="override-header">
+            <div class="override-icon">⚠</div>
+            <div class="override-titles">
+              <span class="override-title">INTERVENTO RICHIESTO</span>
+              <span class="override-subtitle">Il sistema non è sicuro. Decidi entro:</span>
+            </div>
+          </div>
+
+          <div class="countdown-block">
+            <div class="countdown-number" id="countdownNumber">2</div>
+            <div class="countdown-bar-track">
+              <div class="countdown-bar-fill" id="countdownBarFill"></div>
+            </div>
+            <span class="countdown-label">SECONDI AL TIMEOUT</span>
+          </div>
+
+          <div class="override-buttons">
+            <button class="btn-override btn-override-action" id="btnOverride">
+              <span class="ovr-icon">⚡</span>
+              <span class="ovr-text">OVERRIDE</span>
+              <span class="ovr-sub">Prendi il controllo</span>
+            </button>
+            <button class="btn-override btn-override-confirm" id="btnConferma">
+              <span class="ovr-icon">✓</span>
+              <span class="ovr-text">CONFERMA</span>
+              <span class="ovr-sub">Procedi comunque</span>
+            </button>
+          </div>
+
+          <div class="override-fallback-text">
+            Nessuna risposta entro 2 s → <strong>STOP automatico</strong>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- RIGHT: Sensori & Storico -->
+      <section class="panel panel-sensors">
+
+        <div class="panel-title">
+          <span class="panel-icon">⬡</span> LETTURA SENSORI
+        </div>
+
+        <div class="sensor-grid" id="sensorGrid">
+          <div class="sensor-empty">Nessun dato disponibile</div>
+        </div>
+
+        <div class="panel-title" style="margin-top:1.5rem;">
+          <span class="panel-icon">⬡</span> STORICO DECISIONI
+        </div>
+
+        <div class="history-list" id="historyList">
+          <div class="history-empty">Nessuna decisione registrata</div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
