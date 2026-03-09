@@ -1,4 +1,4 @@
-* Il Problema e la Nostra Soluzione *
+**Il Problema e la Nostra Soluzione**
 Attualmente, di fronte a cartelli stradali ambigui o degradati, il software delle navette va in panico, frena bruscamente e mostra stringhe di log incomprensibili sul tablet da 12 pollici del Safety Driver.
 
 Per colmare questo divario uomo-macchina, abbiamo sviluppato due componenti:
