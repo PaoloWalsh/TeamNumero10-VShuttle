@@ -1,0 +1,46 @@
+flowchart TD
+    A([🚌 Safety Driver\napre la dashboard]) --> B[Carica dataset\nscenarios.json]
+    B --> C{File valido?}
+    C -- No --> B
+    C -- Sì --> D[START SIMULATION]
+
+    D --> E[Estrai scenario\ndall'array]
+    E --> F[POST /api/evaluate\nbackend FastAPI]
+
+    F --> G{Risposta\nbackend}
+
+    G -- action: GO --> H[🟢 GO\nAggiorna UI\nBarra confidenza]
+    G -- action: STOP --> I[🔴 STOP\nAggiorna UI\nBarra confidenza]
+    G -- action: OVERRIDE_REQUIRED --> J[🟡 OVERRIDE\nFerma il loop]
+    G -- Timeout / Errore rete --> K[🔴 STOP automatico\ndi sicurezza]
+
+    H --> L[⏱ Attendi 4 secondi]
+    I --> L
+    K --> L
+
+    J --> M[Mostra pannello\ndi emergenza]
+    M --> N[⏳ Countdown 2 secondi]
+
+    N --> O{Decisione\nentro 2s?}
+    O -- OVERRIDE --> P[✅ Registra OVERRIDE\nRiprendi loop]
+    O -- CONFERMA --> Q[✅ Registra CONFERMA\nRiprendi loop]
+    O -- Timeout scaduto --> R[🔴 STOP automatico\nfallback sicurezza]
+
+    P --> L
+    Q --> L
+    R --> L
+
+    L --> S{Altri scenari\ndisponibili?}
+    S -- Sì --> E
+    S -- No --> T([🏁 Missione completata])
+
+    style A fill:#0d1118,color:#4fc3f7,stroke:#4fc3f7
+    style D fill:#006b38,color:#fff,stroke:#00e87a
+    style H fill:#004d29,color:#00e87a,stroke:#00e87a
+    style I fill:#5a0010,color:#ff2d4f,stroke:#ff2d4f
+    style J fill:#5a3c00,color:#ffb800,stroke:#ffb800
+    style K fill:#5a0010,color:#ff2d4f,stroke:#ff2d4f
+    style R fill:#5a0010,color:#ff2d4f,stroke:#ff2d4f
+    style T fill:#0d1118,color:#4fc3f7,stroke:#4fc3f7
+    style M fill:#5a3c00,color:#ffb800,stroke:#ffb800
+    style N fill:#5a3c00,color:#ffb800,stroke:#ffb800

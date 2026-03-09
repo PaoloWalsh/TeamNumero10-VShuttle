@@ -228,7 +228,7 @@ class SimulationController {
             this._suggestedAction = baseAction || 'STOP';
             this._applyDecision({
                 action: 'OVERRIDE_REQUIRED',
-                confidence,
+                confidence: confidence / 10,
                 description: description ?? ACTION_DESCRIPTIONS['OVERRIDE_REQUIRED'],
             });
             this._addLog('Override richiesto — attesa decisione driver', 'override');
