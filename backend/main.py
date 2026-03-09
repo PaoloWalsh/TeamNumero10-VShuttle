@@ -39,7 +39,7 @@ class ActionOutput(BaseModel):
     reason: str
 
 # =================================================================
-# 2. IL LIBRO DELLE REGOLE (Rule Engine Disaccoppiato)
+# 2. Rule Engine Disaccoppiato
 # =================================================================
 TRAFFIC_RULES = [
     {
@@ -98,14 +98,10 @@ GIORNI_FESTIVI = ["Domenica"]
 # =================================================================
 # 3. MOTORE DI ESTRAZIONE E FUSIONE SENSORIALE (Data-Driven NLP)
 # =================================================================
-# =================================================================
-# 3. MOTORE DI ESTRAZIONE E FUSIONE (Ottimizzato per Scenario 3)
-# =================================================================
 class SensorFusionEngine:
     def __init__(self):
         self.vocabulary = {
             "DIVIETO_TRANSITO": [
-                # Rimosso \b per gestire parole attaccate (es. ZTLATTIVA)
                 r"(?<!FINE\s)Z\s*T\s*L", 
                 r"DIVIETO(?!.*(?:SOSTA|FERMATA|SCARICO|AFFISSIONE))", 
                 r"ACCESSO", 
@@ -127,11 +123,9 @@ class SensorFusionEngine:
         if not text: return ""
         text = text.upper()
 
-        # 1. FIX SPAZIATURA (es. "D I V I E T O" -> "DIVIETO")
         # Se ci sono singole lettere separate da spazi, le uniamo
         text = re.sub(r'(?<=\b[A-Z])\s+(?=[A-Z]\b)', '', text)
 
-        # 2. FIX CONTESTUALE ORARI (Il cuore del problema)
         # Cerchiamo pattern tipo O6:OO o I4:3O e trasformiamo solo quelli in numeri
         def fix_time_context(match):
             t = match.group(0)
