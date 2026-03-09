@@ -1,54 +1,64 @@
 import json
 import requests
 
-# 1. Carica il file JSON con tutti gli scenari
-try:
-    with open('VShuttle-input.json', 'r', encoding='utf-8') as f:
-        scenarios = json.load(f)
-except FileNotFoundError:
-    print("Errore: File VShuttle-input.json non trovato!")
-    exit()
+# Configurazione
+BACKEND_URL = "http://127.0.0.1:8000/api/evaluate"
+INPUT_DATA = "VShuttle-input.json"
+EXPECTED_DATA = "VShuttle-expected.json"
 
-url = "http://127.0.0.1:8000/api/evaluate"
-
-print(f"🚀 Inizio stress test su {len(scenarios)} scenari...\n")
-print("-" * 60)
-
-error_count = 0
-review_count = 0
-
-# 2. Cicla attraverso ogni scenario e lo invia al backend
-for scenario in scenarios:
+def run_comprehensive_test():
     try:
-        response = requests.post(url, json=scenario)
-        
-        # Se il server ha risposto correttamente (HTTP 200 OK)
-        if response.status_code == 200:
-            result = response.json()
-            azione = result['action']
-            
-            # Formattazione visiva per il terminale
-            icona = "🟢" if azione == "GO" else "🔴" if azione == "STOP" else "🟡"
-            if azione == "REVIEW": review_count += 1
-            
-            print(f"{icona} Scenario {result['id_scenario']:<4} | Azione: {azione:<6} | Confidenza: {result['confidence']:.2f}")
-            print(f"   Motivo: {result['reason']}")
-            
-        else:
-            print(f"❌ Errore Backend su Scenario {scenario['id_scenario']}: Status {response.status_code}")
-            error_count += 1
-            
-    except requests.exceptions.ConnectionError:
-        print("❌ Errore di connessione: Il server FastAPI è acceso? (Usa uvicorn main:app)")
-        break
-        
-    print("-" * 60)
+        with open(INPUT_DATA, 'r', encoding='utf-8') as f:
+            scenarios = json.load(f)
+        with open(EXPECTED_DATA, 'r', encoding='utf-8') as f:
+            expected_results = json.load(f)
+    except Exception as e:
+        print(f"❌ Errore caricamento file: {e}")
+        return
 
-# 3. Report finale
-print(f"\n✅ Test Completato!")
-print(f"Scenari totali: {len(scenarios)}")
-print(f"Interventi umani richiesti (REVIEW): {review_count}")
-print(f"Errori di sistema (Crash): {error_count}")
+    print(f"🚀 V-SHUTTLE QA RUNNER: Valutazione di {len(scenarios)} scenari")
+    print("-" * 80)
 
-if error_count == 0:
-    print("🏆 OTTIMO LAVORO! Il backend è solido e non è mai andato in crash.")
+    passed, failed, errors = 0, 0, 0
+
+    for scenario in scenarios:
+        sid = str(scenario['id_scenario'])
+        try:
+            response = requests.post(BACKEND_URL, json=scenario, timeout=2)
+            if response.status_code == 200:
+                actual = response.json()
+                exp = expected_results.get(sid)
+                
+                # Validazione
+                if exp:
+                    match = (actual['action'] == exp['action'] and 
+                             actual['needs_review'] == exp['needs_review'])
+                    
+                    if match:
+                        passed += 1
+                        status = "✅ PASS"
+                    else:
+                        failed += 1
+                        status = f"❌ FAIL (Atteso {exp['action']}/Rev:{exp['needs_review']})"
+                    
+                    print(f"Scenario {sid:<4} | Result: {actual['action']:<4} | Review: {str(actual['needs_review']):<5} | {status}")
+                else:
+                    print(f"Scenario {sid:<4} | ⚠️  Mancante nel file expected")
+            else:
+                print(f"Scenario {sid:<4} | ❌ Errore Server (Status {response.status_code})")
+                errors += 1
+        except Exception:
+            print(f"Scenario {sid:<4} | ❌ Connessione fallita")
+            errors += 1
+
+    print("-" * 80)
+    print(f"📊 REPORT FINALE:")
+    print(f"✅ Passati: {passed}")
+    print(f"❌ Falliti: {failed}")
+    print(f"⚠️  Errori Tecnici: {errors}")
+    
+    if failed == 0 and errors == 0:
+        print("\n🏆 BACKEND VALIDATO AL 100%! Pronto per il Test Segreto di Paolo.")
+
+if __name__ == "__main__":
+    run_comprehensive_test()
