@@ -74,9 +74,6 @@ source .venv/bin/activate        # macOS / Linux
 # 2. Installa le dipendenze
 pip install fastapi uvicorn pydantic
 
-# oppure se esiste il requirements.txt
-pip install -r requirements.txt
-
 # 3. Avvia il server
 uvicorn main:app --reload
 ```
