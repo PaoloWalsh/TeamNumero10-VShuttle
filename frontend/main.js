@@ -1,0 +1,519 @@
+/**
+ * V-SHUTTLE — Safety Driver Interface
+ * main.js — SimulationController
+ *
+ * Architecture:
+ *   SimulationController  → owns all state, prevents race conditions
+ *   UIRenderer            → stateless DOM update functions
+ *   ClockTicker           → live clock update loop
+ */
+
+/* ══════════════════════════════════════════════════
+   CONSTANTS
+══════════════════════════════════════════════════ */
+const API_ENDPOINT     = 'http://localhost:5000/api/evaluate';
+const LOOP_INTERVAL_MS = 4000;   // 4 seconds between scenarios
+const OVERRIDE_TIMEOUT = 2000;   // 2 seconds to human decision
+
+/* ══════════════════════════════════════════════════
+   SENSOR LABELS (human-friendly names)
+══════════════════════════════════════════════════ */
+const SENSOR_LABELS = {
+  speed:               'Velocità (km/h)',
+  pedestrians_nearby:  'Pedoni nelle vicinanze',
+  obstacle_detected:   'Ostacolo rilevato',
+  weather:             'Condizioni meteo',
+  traffic_light:       'Semaforo',
+  road_clear:          'Strada libera',
+  confidence:          'Confidenza algoritmo',
+  location:            'Posizione',
+  time_of_day:         'Fascia oraria',
+  road_type:           'Tipo di strada',
+};
+
+const ACTION_LABELS = {
+  GO:   'AVANTI',
+  STOP: 'STOP',
+  OVERRIDE_REQUIRED: 'OVERRIDE',
+};
+
+const ACTION_DESCRIPTIONS = {
+  GO:   'Il sistema ha valutato lo scenario in sicurezza. Proseguire il percorso.',
+  STOP: 'Il sistema ha rilevato un rischio. La navetta rimane ferma.',
+  OVERRIDE_REQUIRED: 'Il livello di confidenza è insufficiente. Richiesto intervento umano.',
+};
+
+/* ══════════════════════════════════════════════════
+   SIMULATION CONTROLLER
+══════════════════════════════════════════════════ */
+class SimulationController {
+  constructor() {
+    this.scenarios     = [];     // loaded dataset
+    this.currentIndex  = 0;      // next scenario pointer
+    this.isRunning     = false;  // main loop flag
+
+    // Timers — held as IDs for reliable cancellation
+    this._loopTimerId         = null;
+    this._overrideTimerId     = null;
+    this._loopProgressTimerId = null;
+    this._overrideProgressRAF = null;
+
+    // Prevents stale async responses from a previous cycle taking effect
+    this._cycleToken = 0;
+
+    this._bindDOM();
+    this._startClock();
+  }
+
+  /* ── DOM REFERENCES ─────────────────────────── */
+  _bindDOM() {
+    this.fileInput        = document.getElementById('fileInput');
+    this.fileStatus       = document.getElementById('fileStatus');
+    this.fileLabel        = document.querySelector('.file-label');
+    this.btnStart         = document.getElementById('btnStart');
+    this.btnStop          = document.getElementById('btnStop');
+    this.btnOverride      = document.getElementById('btnOverride');
+    this.btnConferma      = document.getElementById('btnConferma');
+    this.loopInfo         = document.getElementById('loopInfo');
+    this.loopTimerFill    = document.getElementById('loopTimerFill');
+    this.logEntries       = document.getElementById('logEntries');
+    this.scenarioCounter  = document.getElementById('scenarioCounter');
+    this.sensorGrid       = document.getElementById('sensorGrid');
+    this.historyList      = document.getElementById('historyList');
+    this.overridePanel    = document.getElementById('overridePanel');
+    this.decisionIdle     = document.getElementById('decisionIdle');
+    this.decisionCard     = document.getElementById('decisionCard');
+    this.decisionLabel    = document.getElementById('decisionLabel');
+    this.decisionAction   = document.getElementById('decisionAction');
+    this.actionText       = document.getElementById('actionText');
+    this.decisionDesc     = document.getElementById('decisionDescription');
+    this.confidenceFill   = document.getElementById('confidenceBarFill');
+    this.confidenceValue  = document.getElementById('confidenceValue');
+    this.countdownNumber  = document.getElementById('countdownNumber');
+    this.countdownFill    = document.getElementById('countdownBarFill');
+
+    // Event listeners
+    this.fileInput.addEventListener('change', (e) => this._onFileLoad(e));
+    this.btnStart.addEventListener('click',   () => this._startLoop());
+    this.btnStop.addEventListener('click',    () => this._stopSimulation());
+    this.btnOverride.addEventListener('click', () => this._onHumanDecision('OVERRIDE'));
+    this.btnConferma.addEventListener('click', () => this._onHumanDecision('CONFERMA'));
+  }
+
+  /* ── CLOCK ──────────────────────────────────── */
+  _startClock() {
+    const el = document.getElementById('clock');
+    const tick = () => {
+      const now = new Date();
+      el.textContent = now.toLocaleTimeString('it-IT');
+    };
+    tick();
+    setInterval(tick, 1000);
+  }
+
+  /* ── FILE LOADING ───────────────────────────── */
+  _onFileLoad(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!Array.isArray(data) || data.length === 0) {
+          throw new Error('Il file deve contenere un array di scenari non vuoto.');
+        }
+        this.scenarios    = data;
+        this.currentIndex = 0;
+
+        this.fileStatus.textContent = `${data.length} scenari caricati`;
+        this.fileLabel.classList.add('loaded');
+        this.fileLabel.querySelector('.file-icon').textContent = '✅';
+        this.btnStart.disabled = false;
+
+        this._updateCounter();
+        this._addLog(`Dataset caricato: ${data.length} scenari`, 'info');
+        this._setSystemStatus('idle', 'DATASET PRONTO');
+
+      } catch (err) {
+        this.fileStatus.textContent = 'Errore nel file — riprova';
+        this.fileLabel.classList.remove('loaded');
+        this._addLog(`File non valido`, 'stop');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  /* ── LOOP CONTROL ───────────────────────────── */
+  _startLoop() {
+    if (this.isRunning || this.scenarios.length === 0) return;
+    if (this.currentIndex >= this.scenarios.length) {
+      this.currentIndex = 0; // restart from beginning
+    }
+    this.isRunning = true;
+    this._setUIRunning(true);
+    this._addLog('Simulazione avviata', 'info');
+    this._setSystemStatus('running', 'SIMULAZIONE ATTIVA');
+    this._runNextScenario();
+  }
+
+  _stopSimulation() {
+    this._cancelAllTimers();
+    this.isRunning = false;
+    this._cycleToken++;  // invalidate any in-flight fetch
+    this._setUIRunning(false);
+    this._showOverridePanel(false);
+    this._addLog('Simulazione arrestata dal driver', 'stop');
+    this._setSystemStatus('idle', 'SIMULAZIONE ARRESTATA');
+  }
+
+  /* ── SCENARIO EXECUTION ─────────────────────── */
+  async _runNextScenario() {
+    if (!this.isRunning) return;
+
+    if (this.currentIndex >= this.scenarios.length) {
+      this._addLog('Tutti gli scenari completati', 'info');
+      this._setSystemStatus('idle', 'MISSIONE COMPLETATA');
+      this._setUIRunning(false);
+      this.isRunning = false;
+      return;
+    }
+
+    const scenario   = this.scenarios[this.currentIndex];
+    const myToken    = ++this._cycleToken;
+
+    this._updateCounter();
+    this._renderSensorData(scenario);
+    this._showDecisionProcessing();
+    this._addLog(`Scenario ${this.currentIndex + 1} inviato al sistema`, 'info');
+
+    try {
+      const response = await this._postScenario(scenario);
+
+      // Stale check: if a newer cycle started, discard this response
+      if (myToken !== this._cycleToken) return;
+
+      await this._handleResponse(response);
+
+    } catch (err) {
+      if (myToken !== this._cycleToken) return;
+      // Network / parsing error → treat as STOP for safety
+      this._applyDecision({ action: 'STOP', confidence: 0, description: 'Errore di comunicazione con il sistema.' });
+      this._addLog('Nessuna risposta dal backend — STOP di sicurezza', 'stop');
+      this.currentIndex++;
+      this._scheduleNextLoop();
+    }
+  }
+
+  async _postScenario(scenario) {
+    const res = await fetch(API_ENDPOINT, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(scenario),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  /* ── RESPONSE HANDLING ──────────────────────── */
+  async _handleResponse(data) {
+    const action = (data.action || '').toUpperCase();
+
+    switch (action) {
+      case 'GO':
+      case 'STOP':
+        this._applyDecision({
+          action,
+          confidence:  data.confidence  ?? 80,
+          description: data.description ?? ACTION_DESCRIPTIONS[action],
+        });
+        this._addLog(`Decisione: ${ACTION_LABELS[action] || action}`, action === 'GO' ? 'go' : 'stop');
+        this._addHistory(this.currentIndex + 1, action, data.description);
+        this.currentIndex++;
+        this._scheduleNextLoop();
+        break;
+
+      case 'OVERRIDE_REQUIRED':
+        this._applyDecision({
+          action:      'OVERRIDE_REQUIRED',
+          confidence:  data.confidence ?? 30,
+          description: data.description ?? ACTION_DESCRIPTIONS['OVERRIDE_REQUIRED'],
+        });
+        this._addLog('Override richiesto — attesa decisione driver', 'override');
+        this._startOverrideCountdown();
+        break;
+
+      default:
+        // Unknown response → STOP for safety
+        this._applyDecision({ action: 'STOP', confidence: 0, description: 'Risposta non riconosciuta dal sistema.' });
+        this.currentIndex++;
+        this._scheduleNextLoop();
+    }
+  }
+
+  /* ── DECISION UI ────────────────────────────── */
+  _showDecisionProcessing() {
+    this.decisionIdle.classList.add('hidden');
+    this.overridePanel.classList.add('hidden');
+    this.decisionCard.classList.remove('hidden');
+
+    this.decisionLabel.textContent = 'ELABORAZIONE IN CORSO';
+    this.decisionAction.className  = 'decision-action state-processing';
+    this.actionText.textContent    = '...';
+    this.decisionDesc.textContent  = 'Analisi del sistema in corso…';
+    this.confidenceFill.style.width = '0%';
+    this.confidenceValue.textContent = '—';
+  }
+
+  _applyDecision({ action, confidence, description }) {
+    const isOverride = action === 'OVERRIDE_REQUIRED';
+
+    // Show card with result
+    this.decisionIdle.classList.add('hidden');
+    this.decisionCard.classList.remove('hidden');
+
+    this.decisionLabel.textContent = 'DECISIONE SISTEMA';
+
+    const stateClass = action === 'GO' ? 'state-go' : action === 'STOP' ? 'state-stop' : 'state-processing';
+    this.decisionAction.className = `decision-action ${stateClass}`;
+    this.actionText.textContent   = ACTION_LABELS[action] || action;
+    this.decisionDesc.textContent = description || ACTION_DESCRIPTIONS[action] || '';
+
+    // Confidence bar
+    const pct = Math.min(100, Math.max(0, confidence));
+    this.confidenceFill.style.width  = `${pct}%`;
+    this.confidenceValue.textContent = `${Math.round(pct)}%`;
+
+    // Confidence bar color by level
+    if (pct >= 70) {
+      this.confidenceFill.style.background = 'linear-gradient(90deg, #004d29, var(--go-primary))';
+    } else if (pct >= 40) {
+      this.confidenceFill.style.background = 'linear-gradient(90deg, #5a3c00, var(--override-primary))';
+    } else {
+      this.confidenceFill.style.background = 'linear-gradient(90deg, #5a0010, var(--stop-primary))';
+    }
+
+    // System status
+    if (action === 'GO') {
+      this._setSystemStatus('go', 'VIA LIBERA');
+    } else if (action === 'STOP') {
+      this._setSystemStatus('stop', 'STOP — VEICOLO FERMO');
+    } else if (isOverride) {
+      this._setSystemStatus('override', 'INTERVENTO RICHIESTO');
+      this._showOverridePanel(true);
+    }
+  }
+
+  /* ── OVERRIDE COUNTDOWN ─────────────────────── */
+  _startOverrideCountdown() {
+    const duration = OVERRIDE_TIMEOUT; // 2000ms
+    const start    = performance.now();
+
+    this.countdownNumber.textContent          = '2';
+    this.countdownFill.style.width            = '100%';
+    this.countdownFill.style.transition       = 'none';
+
+    // Force repaint before animating
+    requestAnimationFrame(() => {
+      this.countdownFill.style.transition = `width ${duration}ms linear`;
+      this.countdownFill.style.width      = '0%';
+    });
+
+    // Update digit display
+    const interval = setInterval(() => {
+      const elapsed = performance.now() - start;
+      const remaining = Math.max(0, Math.ceil((duration - elapsed) / 1000));
+      this.countdownNumber.textContent = remaining.toString();
+    }, 100);
+
+    // Fallback fire
+    this._overrideTimerId = setTimeout(() => {
+      clearInterval(interval);
+      if (this.isRunning) {
+        this._onOverrideTimeout();
+      }
+    }, duration);
+
+    // Store interval for cleanup
+    this._overrideIntervalId = interval;
+  }
+
+  _onOverrideTimeout() {
+    this._cancelOverrideTimer();
+    this._showOverridePanel(false);
+
+    // Safety fallback: enforce STOP
+    this.decisionAction.className = 'decision-action state-stop';
+    this.actionText.textContent   = ACTION_LABELS['STOP'];
+    this.decisionDesc.textContent = 'Nessuna risposta del driver — STOP automatico applicato.';
+    this._setSystemStatus('stop', 'STOP AUTOMATICO');
+
+    this._addLog('Timeout scaduto — STOP automatico', 'stop');
+    this._addHistory(this.currentIndex + 1, 'STOP_FALLBACK', 'Timeout driver');
+
+    this.currentIndex++;
+    this._scheduleNextLoop();
+  }
+
+  _onHumanDecision(choice) {
+    if (!this.isRunning) return;
+    this._cancelOverrideTimer();
+    this._showOverridePanel(false);
+
+    const actionLabel = choice === 'OVERRIDE' ? 'OVERRIDE manuale' : 'Confermato dal driver';
+    this._setSystemStatus('go', `${choice} — CICLO RIPRESO`);
+    this._addLog(`Driver: ${actionLabel}`, 'override');
+    this._addHistory(this.currentIndex + 1, choice, actionLabel);
+
+    this.currentIndex++;
+    this._scheduleNextLoop();
+  }
+
+  /* ── LOOP SCHEDULING ────────────────────────── */
+  _scheduleNextLoop() {
+    if (!this.isRunning) return;
+
+    // Animate progress bar over LOOP_INTERVAL_MS
+    this.loopTimerFill.style.transition = 'none';
+    this.loopTimerFill.style.width      = '0%';
+
+    requestAnimationFrame(() => {
+      this.loopTimerFill.style.transition = `width ${LOOP_INTERVAL_MS}ms linear`;
+      this.loopTimerFill.style.width      = '100%';
+    });
+
+    this._loopTimerId = setTimeout(() => {
+      this.loopTimerFill.style.width      = '0%';
+      this.loopTimerFill.style.transition = 'none';
+      this._runNextScenario();
+    }, LOOP_INTERVAL_MS);
+  }
+
+  /* ── TIMER CLEANUP ──────────────────────────── */
+  _cancelAllTimers() {
+    if (this._loopTimerId)        { clearTimeout(this._loopTimerId);        this._loopTimerId = null; }
+    this._cancelOverrideTimer();
+  }
+
+  _cancelOverrideTimer() {
+    if (this._overrideTimerId)    { clearTimeout(this._overrideTimerId);    this._overrideTimerId = null; }
+    if (this._overrideIntervalId) { clearInterval(this._overrideIntervalId); this._overrideIntervalId = null; }
+  }
+
+  /* ── UI HELPERS ─────────────────────────────── */
+  _setUIRunning(running) {
+    this.btnStart.classList.toggle('hidden', running);
+    this.btnStop.classList.toggle('hidden',  !running);
+    this.loopInfo.classList.toggle('hidden', !running);
+    this.loopTimerFill.style.width = '0%';
+    if (!running) {
+      this.decisionCard.classList.add('hidden');
+      this.decisionIdle.classList.remove('hidden');
+    }
+  }
+
+  _showOverridePanel(show) {
+    this.overridePanel.classList.toggle('hidden', !show);
+  }
+
+  _setSystemStatus(state, label) {
+    const el  = document.getElementById('sysStatus');
+    const dot = document.getElementById('statusDot');
+    const lbl = document.getElementById('statusLabel');
+
+    el.className  = `sys-status state-${state}`;
+    lbl.textContent = label;
+  }
+
+  _updateCounter() {
+    this.scenarioCounter.textContent = `${Math.min(this.currentIndex + 1, this.scenarios.length)} / ${this.scenarios.length}`;
+  }
+
+  /* ── SENSOR RENDERING ───────────────────────── */
+  _renderSensorData(scenario) {
+    this.sensorGrid.innerHTML = '';
+
+    const entries = Object.entries(scenario).filter(([k]) => k !== 'id');
+    if (entries.length === 0) {
+      this.sensorGrid.innerHTML = '<div class="sensor-empty">Nessun dato sensore</div>';
+      return;
+    }
+
+    entries.forEach(([key, value]) => {
+      const label = SENSOR_LABELS[key] || key.replace(/_/g, ' ').toUpperCase();
+
+      let displayValue = String(value);
+      let typeClass = 'sensor-string';
+
+      if (typeof value === 'boolean') {
+        displayValue = value ? '● ATTIVO' : '○ INATTIVO';
+        typeClass = value ? 'sensor-bool-true' : 'sensor-bool-false';
+      } else if (typeof value === 'number') {
+        typeClass = 'sensor-number';
+        displayValue = Number.isInteger(value) ? value.toString() : value.toFixed(1);
+      }
+
+      const card = document.createElement('div');
+      card.className = `sensor-card ${typeClass}`;
+      card.innerHTML = `
+        <span class="sensor-name">${label}</span>
+        <span class="sensor-value">${displayValue}</span>
+      `;
+      this.sensorGrid.appendChild(card);
+    });
+  }
+
+  /* ── LOG ────────────────────────────────────── */
+  _addLog(message, type = 'info') {
+    // Clear placeholder
+    const placeholder = this.logEntries.querySelector('.log-idle');
+    if (placeholder) placeholder.remove();
+
+    const time = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+    entry.textContent = `${time} — ${message}`;
+
+    this.logEntries.prepend(entry);
+
+    // Keep max 20 entries
+    while (this.logEntries.children.length > 20) {
+      this.logEntries.removeChild(this.logEntries.lastChild);
+    }
+  }
+
+  /* ── HISTORY ────────────────────────────────── */
+  _addHistory(num, action, detail = '') {
+    const placeholder = this.historyList.querySelector('.history-empty');
+    if (placeholder) placeholder.remove();
+
+    const classMap = {
+      GO:           'h-go',
+      STOP:         'h-stop',
+      OVERRIDE:     'h-override',
+      CONFERMA:     'h-override',
+      STOP_FALLBACK:'h-fallback',
+    };
+
+    const item = document.createElement('div');
+    item.className = `history-item ${classMap[action] || 'h-stop'}`;
+    item.innerHTML = `
+      <span class="history-num">#${num}</span>
+      <span class="history-action">${ACTION_LABELS[action] || action}</span>
+      <span class="history-detail">${detail}</span>
+    `;
+    this.historyList.prepend(item);
+
+    // Keep max 30 entries
+    while (this.historyList.children.length > 30) {
+      this.historyList.removeChild(this.historyList.lastChild);
+    }
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   BOOT
+══════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', () => {
+  window.sim = new SimulationController();
+});
