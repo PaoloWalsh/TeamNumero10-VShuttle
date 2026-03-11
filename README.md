@@ -21,7 +21,7 @@ Le navette V-Shuttle di Waymo LCC operano nei centri storici toscani, dove carte
 | -------------- | ------------------------------------------------------- |
 | Luca Granucci | Backend — algoritmo di fusione sensoriale e Rule Engine |
 | Paolo Walsh | Frontend — Dashboard UI e SimulationController          |
-| Marco Franzoni | Architettura, integrazione e QA                         |
+| Marco Fronzoni | Architettura, integrazione e QA                         |
 
 ---
 
